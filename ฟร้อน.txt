@@ -1,0 +1,318 @@
+# คำแนะนำสำหรับ Frontend Developer
+
+## 🚀 วิธีรันระบบ Backend
+
+### 1. ติดตั้ง Dependencies
+```bash
+npm install
+```
+
+### 2. ตั้งค่า Database (PostgreSQL)
+- ติดตั้ง PostgreSQL บนเครื่อง
+- สร้าง database ชื่อ "consent"
+- Username: postgres, Password: 4321, Port: 5432
+
+### 3. รันเซิร์ฟเวอร์
+```bash
+# Development mode (auto-restart)
+npm run dev
+
+# หรือ Production mode
+npm start
+```
+
+เซิร์ฟเวอร์จะรันที่: http://localhost:3000
+
+---
+
+## 📋 API Endpoints สำหรับ Frontend
+
+### Base URL
+```
+http://localhost:3000/api
+```
+
+### 1. ส่งข้อมูลความยินยอม
+```javascript
+POST /api/consent/submit
+
+// Request Body:
+{
+  "title": "นาย",           // หรือ "นาง", "นางสาว", "Mr.", "Mrs.", "Miss", "Ms."
+  "nameSurname": "สมชาย ใจดี",
+  "idPassport": "1234567890123",
+  "language": "th",        // "th" หรือ "en"
+  "consentType": "customer" // "customer", "employee", "partner"
+}
+
+// Response (สำเร็จ):
+{
+  "success": true,
+  "message": "Consent submitted successfully",
+  "data": {
+    "id": 1,
+    "submissionId": "uuid-here",
+    "record": { ... }
+  }
+}
+
+// Response (มีข้อมูลแล้ว):
+{
+  "success": false,
+  "message": "Consent already exists for this ID/Passport number",
+  "existingRecord": {
+    "id": 1,
+    "submittedDate": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+### 2. ตรวจสอบข้อมูลที่มีอยู่
+```javascript
+GET /api/consent/check/1234567890123
+
+// Response (พบข้อมูล):
+{
+  "success": true,
+  "message": "Consent record found",
+  "data": {
+    "id": 1,
+    "title": "นาย",
+    "name_surname": "สมชาย ใจดี",
+    "created_date": "2024-01-15T10:30:00.000Z",
+    "consent_language": "th",
+    "consent_type": "customer"
+  }
+}
+
+// Response (ไม่พบข้อมูล):
+{
+  "success": false,
+  "message": "No consent record found for this ID/Passport number"
+}
+```
+
+### 3. ดึงรายการข้อมูลทั้งหมด (สำหรับ Admin)
+```javascript
+GET /api/consent/list?page=1&limit=10&search=สมชาย&type=customer&language=th&startDate=2024-01-01&endDate=2024-12-31
+
+// Response:
+{
+  "success": true,
+  "data": {
+    "records": [...],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 5,
+      "totalRecords": 50,
+      "recordsPerPage": 10,
+      "hasNextPage": true,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+### 4. สถิติข้อมูล
+```javascript
+GET /api/consent/stats
+
+// Response:
+{
+  "success": true,
+  "data": {
+    "total": 100,
+    "byType": [
+      {"consent_type": "customer", "count": "80"},
+      {"consent_type": "employee", "count": "20"}
+    ],
+    "byLanguage": [
+      {"consent_language": "th", "count": "70"},
+      {"consent_language": "en", "count": "30"}
+    ],
+    "byDate": [...]
+  }
+}
+```
+
+### 5. Export ข้อมูล
+```javascript
+// Export Excel
+GET /api/export/excel?startDate=2024-01-01&endDate=2024-12-31
+// จะได้ไฟล์ Excel download
+
+// Export CSV
+GET /api/export/csv?startDate=2024-01-01&endDate=2024-12-31
+// จะได้ไฟล์ CSV download
+
+// Export Summary
+GET /api/export/summary
+// ข้อมูลสรุปสำหรับ export
+```
+
+---
+
+## 🎨 Frontend Implementation Guide
+
+### 1. Form Validation
+```javascript
+// ตรวจสอบข้อมูลก่อนส่ง
+const validateForm = (data) => {
+  const errors = [];
+  
+  if (!data.title) errors.push('กรุณาเลือกคำนำหน้า');
+  if (!data.nameSurname || data.nameSurname.length < 2) {
+    errors.push('กรุณากรอกชื่อ-นามสกุล (อย่างน้อย 2 ตัวอักษร)');
+  }
+  if (!data.idPassport || data.idPassport.length < 8) {
+    errors.push('กรุณากรอกเลขบัตรประชาชน/Passport (อย่างน้อย 8 ตัวอักษร)');
+  }
+  
+  return errors;
+};
+```
+
+### 2. API Call Example (JavaScript/Fetch)
+```javascript
+// ส่งข้อมูลความยินยอม
+const submitConsent = async (formData) => {
+  try {
+    const response = await fetch('http://localhost:3000/api/consent/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(formData)
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      alert('บันทึกข้อมูลสำเร็จ!');
+      // redirect หรือ show success message
+    } else {
+      alert('เกิดข้อผิดพลาด: ' + result.message);
+      // show error message
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    alert('เกิดข้อผิดพลาดในการเชื่อมต่อ');
+  }
+};
+
+// ตรวจสอบข้อมูลที่มีอยู่
+const checkExistingConsent = async (idPassport) => {
+  try {
+    const response = await fetch(`http://localhost:3000/api/consent/check/${idPassport}`);
+    const result = await response.json();
+    
+    if (result.success) {
+      // มีข้อมูลแล้ว - แสดงข้อความแจ้งเตือน
+      return result.data;
+    } else {
+      // ไม่มีข้อมูล - สามารถส่งได้
+      return null;
+    }
+  } catch (error) {
+    console.error('Error checking consent:', error);
+    return null;
+  }
+};
+```
+
+### 3. React Example
+```jsx
+import React, { useState } from 'react';
+
+const ConsentForm = () => {
+  const [formData, setFormData] = useState({
+    title: '',
+    nameSurname: '',
+    idPassport: '',
+    language: 'th',
+    consentType: 'customer'
+  });
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    try {
+      // ตรวจสอบข้อมูลที่มีอยู่ก่อน
+      const existing = await checkExistingConsent(formData.idPassport);
+      if (existing) {
+        setMessage('เลขบัตรนี้ได้ให้ความยินยอมแล้วเมื่อ: ' + new Date(existing.created_date).toLocaleDateString('th-TH'));
+        setLoading(false);
+        return;
+      }
+      
+      // ส่งข้อมูล
+      const response = await fetch('http://localhost:3000/api/consent/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setMessage('บันทึกข้อมูลสำเร็จ!');
+        // Reset form หรือ redirect
+      } else {
+        setMessage('เกิดข้อผิดพลาด: ' + result.message);
+      }
+    } catch (error) {
+      setMessage('เกิดข้อผิดพลาดในการเชื่อมต่อ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Form fields here */}
+      <button type="submit" disabled={loading}>
+        {loading ? 'กำลังบันทึก...' : 'ยืนยันการให้ความยินยอม'}
+      </button>
+      {message && <div className="message">{message}</div>}
+    </form>
+  );
+};
+```
+
+---
+
+## 🔒 Security Notes
+
+1. **CORS**: Backend ได้ตั้งค่า CORS แล้ว สำหรับ localhost:3000, 3001
+2. **Rate Limiting**: จำกัด 100 requests ต่อ 15 นาที ต่อ IP
+3. **Input Validation**: Backend จะตรวจสอบข้อมูลทั้งหมดก่อนบันทึก
+4. **SQL Injection Protection**: ใช้ Parameterized queries
+
+---
+
+## 🐛 Troubleshooting
+
+### ปัญหาที่อาจเจอ:
+
+1. **Database Connection Error**
+   - ตรวจสอบ PostgreSQL ทำงานหรือไม่
+   - ตรวจสอบ username/password ในไฟล์ .env
+
+2. **CORS Error**
+   - ตรวจสอบ URL ของ Frontend ใน server.js
+   - ใช้ http://localhost:3000 หรือ 3001
+
+3. **Port Already in Use**
+   - เปลี่ยน PORT ในไฟล์ .env
+   - หรือปิดโปรแกรมที่ใช้ port 3000
+
+---
+
+## 📞 Contact
+
+หากมีปัญหาหรือข้อสงสัย สามารถติดต่อทีม Backend ได้เลย!
+
+**Backend API พร้อมใช้งานแล้ว! 🎉**
