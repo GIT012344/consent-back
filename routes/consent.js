@@ -1,22 +1,22 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
-const { pool } = require('../config/database');
-const { v4: uuidv4 } = require('uuid');
-const moment = require('moment');
-
 const router = express.Router();
+const { pool } = require('../config/database');
+const { body, validationResult } = require('express-validator');
+const { validateConsentRole } = require('../middleware/roleCheck');
+const moment = require('moment');
+const { v4: uuidv4 } = require('uuid');
 
 // Validation middleware
 const validateConsentSubmission = [
-  body('title')
+  body('name')
     .trim()
-    .isIn(['นาย', 'นาง', 'นางสาว', 'Mr.', 'Mrs.', 'Miss', 'Ms.'])
-    .withMessage('Invalid title'),
+    .notEmpty()
+    .withMessage('Name is required'),
   
-  body('nameSurname')
+  body('surname')
     .trim()
-    .isLength({ min: 2, max: 255 })
-    .withMessage('Name-Surname must be between 2 and 255 characters'),
+    .notEmpty()
+    .withMessage('Surname is required'),
   
   body('idPassport')
     .trim()
@@ -25,12 +25,21 @@ const validateConsentSubmission = [
   
   body('email')
     .optional()
-    .isEmail()
+    .custom((value) => {
+      if (!value || value.trim() === '') return true; // Allow empty
+      // Check email format only if not empty
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return emailRegex.test(value);
+    })
     .withMessage('Invalid email format'),
   
   body('phone')
     .optional()
-    .matches(/^[0-9]{9,10}$/)
+    .custom((value) => {
+      if (!value || value.trim() === '') return true; // Allow empty
+      // Check phone format only if not empty
+      return /^[0-9]{9,10}$/.test(value);
+    })
     .withMessage('Phone must be 9-10 digits'),
   
   body('language')
@@ -45,8 +54,10 @@ const validateConsentSubmission = [
   
   body('userType')
     .optional()
-    .isIn(['customer', 'employee', 'partner'])
-    .withMessage('Invalid user type'),
+    .isString()
+    .trim()
+    .notEmpty()
+    .withMessage('User type must be a non-empty string'),
   
   body('consentVersionId')
     .optional()
@@ -56,7 +67,27 @@ const validateConsentSubmission = [
   body('consentVersion')
     .optional()
     .isString()
-    .withMessage('Consent version must be a string')
+    .withMessage('Consent version must be a string'),
+    
+  body('policyTitle')
+    .optional()
+    .isString()
+    .withMessage('Policy title must be a string'),
+    
+  body('policyVersion')
+    .optional()
+    .isString()
+    .withMessage('Policy version must be a string'),
+    
+  body('browser')
+    .optional()
+    .isString()
+    .withMessage('Browser must be a string'),
+    
+  body('userAgent')
+    .optional()
+    .isString()
+    .withMessage('User agent must be a string')
 ];
 
 // Helper function to get client IP
@@ -73,12 +104,25 @@ const getBrowserInfo = (req) => {
   return req.headers['user-agent'] || 'Unknown';
 };
 
+// POST /api/consent - Submit new consent (alternative endpoint)
+router.post('/', validateConsentSubmission, async (req, res) => {
+  return handleConsentSubmission(req, res);
+});
+
 // POST /api/consent/submit - Submit new consent
-router.post('/submit', validateConsentSubmission, async (req, res) => {
+router.post('/submit', validateConsentSubmission, validateConsentRole, async (req, res) => {
+  return handleConsentSubmission(req, res);
+});
+
+// Shared handler function for consent submission
+const handleConsentSubmission = async (req, res) => {
   try {
+    console.log('Received consent submission:', req.body);
+    
     // Check validation results
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
         message: 'Validation failed',
@@ -86,15 +130,41 @@ router.post('/submit', validateConsentSubmission, async (req, res) => {
       });
     }
 
-    const { title, nameSurname, idPassport, email, phone, language = 'th', consentType, userType = 'customer', consentVersionId, consentVersion } = req.body;
+    const { 
+      name,
+      surname,
+      nameSurname, 
+      idPassport, 
+      email, 
+      phone, 
+      language = 'th', 
+      consentType, 
+      userType = 'customer', 
+      consentVersionId, 
+      consentVersion,
+      policyTitle,
+      policyVersion,
+      browser: clientBrowser,
+      userAgent: clientUserAgent
+    } = req.body;
+    
+    // Combine name and surname if provided separately
+    const fullName = nameSurname || `${name} ${surname}`.trim();
 
+    // Get IP address from request
     const ipAddress = getClientIP(req);
-    const browser = getBrowserInfo(req);
-    const finalConsentVersion = consentVersion || '1.0';
+    
+    // Use browser info from client if provided, otherwise from headers
+    const browser = clientBrowser || getBrowserInfo(req);
+    const userAgent = clientUserAgent || req.headers['user-agent'] || 'Unknown';
+    
+    // Use policy version if provided, otherwise consent version, otherwise default
+    const finalConsentVersion = policyVersion || consentVersion || '1.0';
+    const finalPolicyTitle = policyTitle || 'Consent Policy';
 
     // Check if consent already exists for this ID/Passport with the same version
     const existingConsent = await pool.query(
-      `SELECT id, created_date, consent_version, title, name_surname, consent_type, consent_language 
+      `SELECT id, created_date, consent_version, name_surname, consent_type, consent_language 
        FROM consent_records 
        WHERE id_passport = $1 AND is_active = TRUE 
        ORDER BY created_date DESC 
@@ -112,7 +182,6 @@ router.post('/submit', validateConsentSubmission, async (req, res) => {
           message: 'Consent already exists for this ID/Passport number and version',
           existingRecord: {
             id: existing.id,
-            title: existing.title,
             name_surname: existing.name_surname,
             created_date: existing.created_date,
             consent_type: existing.consent_type,
@@ -129,51 +198,56 @@ router.post('/submit', validateConsentSubmission, async (req, res) => {
       );
     }
 
-    // Insert new consent record
+    // Generate unique consent ID
+    const consentId = `CNS${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    // Insert consent record - use only existing columns
     const insertQuery = `
       INSERT INTO consent_records 
-      (title, name_surname, id_passport, email, phone, ip_address, browser_info, 
-       user_type, consent_language, consent_version, consent_version_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING id, uid
+      (name_surname, id_passport, ip_address, 
+       user_type, consent_type, consent_language, consent_version, created_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      RETURNING id, created_date, created_time
     `;
 
     const result = await pool.query(insertQuery, [
-      title,
-      nameSurname,
+      fullName,
       idPassport,
-      email,
-      phone,
       ipAddress,
-      browser,
-      userType || 'customer',  // Use userType from request
+      userType || 'customer',  // user_type
+      consentType || userType || 'customer',  // consent_type
       language,
-      finalConsentVersion,
-      consentVersionId || null
+      finalConsentVersion
     ]);
     
-    // Also insert into consent_history for tracking all versions
-    const historyQuery = `
-      INSERT INTO consent_history 
-      (id_passport, title, name_surname, consent_version, consent_version_id, 
-       consent_type, user_type, consent_language, is_active, ip_address, browser, action)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-    `;
+    // Check if consent_history table exists and has the required columns
+    const checkHistoryTable = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'consent_history'
+      )
+    `);
     
-    await pool.query(historyQuery, [
-      idPassport,
-      title,
-      nameSurname,
-      finalConsentVersion,
-      consentVersionId || null,
-      userType || 'customer',  // as consent_type
-      userType || 'customer',  // as user_type
-      language,
-      true,
-      ipAddress,
-      browser,
-      'consent_given'
-    ]);
+    if (checkHistoryTable.rows[0].exists) {
+      // Insert into consent_history for tracking all versions
+      // Note: consent_history table uses created_date as TIMESTAMP, not DATE
+      const historyQuery = `
+        INSERT INTO consent_history 
+        (id_passport, name_surname, consent_version, 
+         consent_type, user_type, consent_language, action)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `;
+      
+      await pool.query(historyQuery, [
+        idPassport,
+        fullName,
+        finalConsentVersion,
+        userType || 'customer',  // as consent_type
+        userType || 'customer',  // as user_type
+        language,
+        'consent_given'
+      ]);
+    }
 
     // Get the inserted record
     const newRecord = await pool.query(
@@ -186,6 +260,9 @@ router.post('/submit', validateConsentSubmission, async (req, res) => {
       message: 'Consent submitted successfully',
       data: {
         id: result.rows[0].id,
+        consentId: result.rows[0].consent_id,
+        createdDate: result.rows[0].created_date,
+        createdTime: result.rows[0].created_time,
         submissionId: uuidv4(),
         record: newRecord.rows[0]
       }
@@ -199,7 +276,7 @@ router.post('/submit', validateConsentSubmission, async (req, res) => {
       error: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
-});
+};
 
 // GET /api/consent/check/:idPassport - Check if consent exists
 router.get('/check/:idPassport', async (req, res) => {
@@ -214,7 +291,7 @@ router.get('/check/:idPassport', async (req, res) => {
     }
 
     const records = await pool.query(
-      'SELECT id, title, name_surname, created_date, consent_language, consent_type FROM consent_records WHERE id_passport = $1 AND is_active = TRUE',
+      'SELECT id, name_surname, created_date, consent_language, consent_type FROM consent_records WHERE id_passport = $1 AND is_active = TRUE',
       [idPassport.trim()]
     );
 
@@ -484,9 +561,9 @@ router.get('/active-version/:userType/:language', async (req, res) => {
   try {
     const { userType, language } = req.params;
     
-    // Query for version based on userType and language
-    const query = `
-      SELECT * FROM consent_versions 
+    // First try policy_versions table (new structure)
+    const policyQuery = `
+      SELECT * FROM policy_versions 
       WHERE is_active = TRUE 
         AND user_type = $1 
         AND language = $2
@@ -494,12 +571,12 @@ router.get('/active-version/:userType/:language', async (req, res) => {
       LIMIT 1
     `;
     
-    let result = await pool.query(query, [userType, language]);
+    let result = await pool.query(policyQuery, [userType, language]);
     
-    // If no specific version found, try to get default version for the userType
+    // If no specific version found, try without language match
     if (result.rows.length === 0) {
       const defaultQuery = `
-        SELECT * FROM consent_versions 
+        SELECT * FROM policy_versions 
         WHERE is_active = TRUE 
           AND user_type = $1
         ORDER BY created_at DESC
@@ -508,15 +585,17 @@ router.get('/active-version/:userType/:language', async (req, res) => {
       result = await pool.query(defaultQuery, [userType]);
     }
     
-    // If still no version, get any active version
+    // If still no version, try consent_versions table (old structure)
     if (result.rows.length === 0) {
-      const fallbackQuery = `
+      const consentQuery = `
         SELECT * FROM consent_versions 
-        WHERE is_active = TRUE
+        WHERE is_active = TRUE 
+          AND user_type = $1 
+          AND language = $2
         ORDER BY created_at DESC
         LIMIT 1
       `;
-      result = await pool.query(fallbackQuery);
+      result = await pool.query(consentQuery, [userType, language]);
     }
     
     if (result.rows.length > 0) {

@@ -1,107 +1,60 @@
-// Simple test script to verify API is working
 const axios = require('axios');
 
-const API_BASE = 'http://localhost:3000/api';
-          const result = JSON.parse(data);
-          console.log('✅ Health endpoint working:', result);
-          resolve(result);
-        } catch (error) {
-          console.log('❌ Health endpoint response:', data);
-          reject(error);
-        }
-      });
-    });
-    
-    req.on('error', (error) => {
-      console.log('❌ Health endpoint failed:', error.message);
-      reject(error);
-    });
-    
-    req.setTimeout(5000, () => {
-      console.log('❌ Health endpoint timeout');
-      req.destroy();
-      reject(new Error('Timeout'));
-    });
-  });
-};
+const BASE_URL = 'http://localhost:4000/api';
 
-const testConsentSubmission = () => {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({
-      title: 'นาย',
-      nameSurname: 'ทดสอบ ระบบ',
-      idPassport: 'TEST123456789',
-      language: 'th',
-      consentType: 'customer'
-    });
-
-    const options = {
-      hostname: 'localhost',
-      port: 3000,
-      path: '/api/consent/submit',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    };
-
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => data += chunk);
-      res.on('end', () => {
-        try {
-          const result = JSON.parse(data);
-          console.log('✅ Consent submission test:', result);
-          resolve(result);
-        } catch (error) {
-          console.log('❌ Consent submission response:', data);
-          reject(error);
-        }
-      });
-    });
-
-    req.on('error', (error) => {
-      console.log('❌ Consent submission failed:', error.message);
-      reject(error);
-    });
-
-    req.setTimeout(5000, () => {
-      console.log('❌ Consent submission timeout');
-      req.destroy();
-      reject(new Error('Timeout'));
-    });
-
-    req.write(postData);
-    req.end();
-  });
-};
-
-// Run tests
-const runTests = async () => {
-  console.log('🧪 Testing Consent Management API...\n');
+async function testAPIs() {
+  console.log('🧪 Testing Backend APIs...\n');
   
+  // Test 1: Check server health
   try {
-    // Test 1: Health endpoint
-    console.log('1. Testing health endpoint...');
-    await testHealthEndpoint();
-    
-    // Wait a bit
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Test 2: Consent submission (this might fail if database is not set up)
-    console.log('\n2. Testing consent submission...');
-    await testConsentSubmission();
-    
-    console.log('\n🎉 All tests passed! API is working correctly.');
-    
+    const health = await axios.get('http://localhost:4000/health');
+    console.log('✅ Server Health:', health.data);
   } catch (error) {
-    console.log('\n⚠️  Some tests failed. This might be due to database not being set up yet.');
-    console.log('Make sure PostgreSQL is running and database "consent" exists.');
+    console.log('❌ Server Health Failed:', error.message);
   }
   
-  process.exit(0);
-};
+  // Test 2: List policies
+  try {
+    const policies = await axios.get(`${BASE_URL}/simple-policy/list`);
+    console.log('✅ List Policies:', policies.data.success ? `Found ${policies.data.data.length} policies` : 'Failed');
+  } catch (error) {
+    console.log('❌ List Policies Failed:', error.response?.data || error.message);
+  }
+  
+  // Test 3: Get active policy
+  try {
+    const active = await axios.get(`${BASE_URL}/simple-policy/active?userType=customer&language=th-TH`);
+    console.log('✅ Active Policy:', active.data.success ? 'Found' : 'Not found');
+  } catch (error) {
+    console.log('❌ Active Policy Failed:', error.response?.status === 404 ? 'No active policy (expected)' : error.message);
+  }
+  
+  // Test 4: Create a test policy
+  try {
+    const newPolicy = await axios.post(`${BASE_URL}/simple-policy`, {
+      tenant_code: 'default',
+      version: '1.0.0',
+      language: 'th-TH',
+      userType: 'customer',
+      title: 'Test Privacy Policy',
+      content: '<h1>นโยบายความเป็นส่วนตัว</h1><p>ทดสอบระบบ</p>',
+      effective_date: new Date().toISOString().split('T')[0],
+      is_mandatory: true,
+      enforce_mode: 'strict'
+    });
+    console.log('✅ Create Policy:', newPolicy.data.success ? 'Created successfully' : 'Failed');
+    
+    // Now test active policy again
+    const activeAfter = await axios.get(`${BASE_URL}/simple-policy/active?userType=customer&language=th-TH`);
+    console.log('✅ Active Policy After Create:', activeAfter.data.success ? 'Found' : 'Not found');
+  } catch (error) {
+    console.log('❌ Create Policy Failed:', error.response?.data || error.message);
+  }
+  
+  console.log('\n✨ API Testing Complete!');
+}
 
-// Wait a bit for server to start, then run tests
-setTimeout(runTests, 2000);
+// Run tests
+setTimeout(() => {
+  testAPIs().catch(console.error);
+}, 1000);

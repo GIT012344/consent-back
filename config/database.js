@@ -85,7 +85,7 @@ const initializeDatabase = async () => {
         withdrawn_date TIMESTAMP,
         expiry_date TIMESTAMP
       )
-    `;
+    `; 
     await client.query(createConsentsTable);
     
     // 4. Create consent_version_targeting table
@@ -222,6 +222,66 @@ const initializeDatabase = async () => {
     `;
     await client.query(createFormTemplatesTable);
     
+    // Create consent_form_fields table
+    const createFormFieldsTable = `
+      CREATE TABLE IF NOT EXISTS consent_form_fields (
+        id SERIAL PRIMARY KEY,
+        field_name VARCHAR(100) NOT NULL UNIQUE,
+        field_label_th VARCHAR(255) NOT NULL,
+        field_label_en VARCHAR(255) NOT NULL,
+        field_type VARCHAR(50) NOT NULL DEFAULT 'text',
+        is_required BOOLEAN DEFAULT false,
+        is_active BOOLEAN DEFAULT true,
+        display_order INTEGER DEFAULT 0,
+        options JSONB DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    await client.query(createFormFieldsTable);
+    
+    // Create consent_titles table
+    const createTitlesTable = `
+      CREATE TABLE IF NOT EXISTS consent_titles (
+        id SERIAL PRIMARY KEY,
+        title_th VARCHAR(50) NOT NULL,
+        title_en VARCHAR(50) NOT NULL,
+        display_order INTEGER DEFAULT 0,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    await client.query(createTitlesTable);
+    
+    // Insert default form fields if not exists
+    const fieldsCheck = await client.query('SELECT COUNT(*) FROM consent_form_fields');
+    if (fieldsCheck.rows[0].count === '0') {
+      await client.query(`
+        INSERT INTO consent_form_fields (field_name, field_label_th, field_label_en, field_type, is_required, display_order)
+        VALUES 
+          ('email', 'อีเมล', 'Email', 'email', false, 1),
+          ('phone', 'เบอร์โทรศัพท์', 'Phone Number', 'phone', false, 2),
+          ('address', 'ที่อยู่', 'Address', 'text', false, 3),
+          ('birthdate', 'วันเกิด', 'Birth Date', 'date', false, 4),
+          ('occupation', 'อาชีพ', 'Occupation', 'text', false, 5)
+      `);
+    }
+    
+    // Insert default titles if not exists
+    const titlesCheck = await client.query('SELECT COUNT(*) FROM consent_titles');
+    if (titlesCheck.rows[0].count === '0') {
+      await client.query(`
+        INSERT INTO consent_titles (title_th, title_en, display_order)
+        VALUES 
+          ('นาย', 'Mr.', 1),
+          ('นาง', 'Mrs.', 2),
+          ('นางสาว', 'Ms.', 3),
+          ('ดร.', 'Dr.', 4),
+          ('ศ.', 'Prof.', 5)
+      `);
+    }
+    
     // Insert default admin user if not exists
     const bcrypt = require('bcryptjs');
     const defaultPassword = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'admin123', 10);
@@ -244,6 +304,107 @@ const initializeDatabase = async () => {
         'admin'
       ]);
     }
+    
+    // Create policy management tables
+    const createTenantsTable = `
+      CREATE TABLE IF NOT EXISTS tenants (
+        code VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        language VARCHAR(10) DEFAULT 'th',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    await client.query(createTenantsTable);
+    
+    const createPolicyKindsTable = `
+      CREATE TABLE IF NOT EXISTS policy_kinds (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    await client.query(createPolicyKindsTable);
+    
+    const createPoliciesTable = `
+      CREATE TABLE IF NOT EXISTS policies (
+        id SERIAL PRIMARY KEY,
+        tenant_code VARCHAR(50) REFERENCES tenants(code),
+        policy_kind_code VARCHAR(50) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    await client.query(createPoliciesTable);
+    
+    const createPolicyVersionsTable = `
+      CREATE TABLE IF NOT EXISTS policy_versions (
+        id SERIAL PRIMARY KEY,
+        policy_id INTEGER REFERENCES policies(id),
+        version VARCHAR(50) NOT NULL,
+        title VARCHAR(500) NOT NULL,
+        content TEXT NOT NULL,
+        language VARCHAR(10) NOT NULL,
+        effective_date DATE NOT NULL,
+        expiry_date DATE,
+        is_mandatory BOOLEAN DEFAULT true,
+        enforce_mode VARCHAR(50) DEFAULT 'strict',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(policy_id, version, language)
+      )
+    `;
+    await client.query(createPolicyVersionsTable);
+    
+    const createAudiencesTable = `
+      CREATE TABLE IF NOT EXISTS audiences (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) UNIQUE NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    await client.query(createAudiencesTable);
+    
+    const createPolicyVersionAudiencesTable = `
+      CREATE TABLE IF NOT EXISTS policy_version_audiences (
+        policy_version_id INTEGER REFERENCES policy_versions(id),
+        audience_id INTEGER REFERENCES audiences(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (policy_version_id, audience_id)
+      )
+    `;
+    await client.query(createPolicyVersionAudiencesTable);
+    
+    // Insert default policy data
+    await client.query(`
+      INSERT INTO tenants (code, name, language) 
+      VALUES ('default', 'Default Tenant', 'th')
+      ON CONFLICT (code) DO NOTHING
+    `);
+    
+    await client.query(`
+      INSERT INTO policy_kinds (code, name, description) 
+      VALUES 
+        ('privacy', 'Privacy Policy', 'Privacy and data protection policies'),
+        ('consent', 'Consent Policy', 'General consent policies'),
+        ('terms', 'Terms of Service', 'Terms and conditions')
+      ON CONFLICT (code) DO NOTHING
+    `);
+    
+    await client.query(`
+      INSERT INTO audiences (name, description)
+      VALUES 
+        ('customer', 'Customer users'),
+        ('employee', 'Employee users'),
+        ('partner', 'Partner users'),
+        ('public', 'Public users')
+      ON CONFLICT (name) DO NOTHING
+    `);
     
     // Insert default consent versions if not exists
     const versionCheckTh = await client.query(
@@ -279,8 +440,7 @@ const initializeDatabase = async () => {
   }
 };
 
-module.exports = {
-  pool,
-  testConnection,
-  initializeDatabase
-};
+module.exports = pool;
+module.exports.pool = pool;
+module.exports.testConnection = testConnection;
+module.exports.initializeDatabase = initializeDatabase;

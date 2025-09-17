@@ -6,10 +6,11 @@ require('dotenv').config();
 
 const { testConnection, initializeDatabase } = require('./config/database');
 const consentRoutes = require('./routes/consent');
-const consentVersionsRoutes = require('./routes/consent-versions');
-const uploadRoutes = require('./routes/upload');
-const exportRoutes = require('./routes/export');
-const formTemplatesRoutes = require('./routes/form-templates');
+const adminStatisticsRoutes = require('./routes/admin-statistics');
+const adminDashboardRoutes = require('./routes/admin-dashboard');
+const adminPolicyVersionsRoutes = require('./routes/admin-policy-versions');
+const adminReportsRoutes = require('./routes/admin-reports');
+const simplePolicyRoutes = require('./routes/simple-policy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,15 +35,20 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Rate limiting
+// Rate limiting - increased limits for development
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // increased to 1000 requests per windowMs
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for localhost in development
+    const ip = req.ip || req.connection.remoteAddress;
+    return process.env.NODE_ENV !== 'production' && (ip === '::1' || ip === '127.0.0.1' || ip === '::ffff:127.0.0.1');
+  }
 });
 
 app.use(limiter);
@@ -62,12 +68,21 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API routes
+// API Routes
+app.use('/api/simple-policy', simplePolicyRoutes);
 app.use('/api/consent', consentRoutes);
-app.use('/api/consent', consentVersionsRoutes);
-app.use('/api/upload', uploadRoutes);
-app.use('/api/export', exportRoutes);
-app.use('/api/form-templates', formTemplatesRoutes);
+app.use('/api/consent/versions', require('./routes/consent-versions'));
+app.use('/api/consent/records', require('./routes/consent-records'));
+app.use('/api/titles', require('./routes/titles'));
+app.use('/api/form-fields', require('./routes/form-fields'));
+app.use('/api/user-types', require('./routes/user-types'));
+app.use('/api/policy-versions', require('./routes/policy-versions'));
+app.use('/api/upload', require('./routes/upload'));
+app.use('/api/export', require('./routes/export'));
+app.use('/api/admin', adminStatisticsRoutes);
+app.use('/api/admin', adminDashboardRoutes);
+app.use('/api', adminPolicyVersionsRoutes);
+app.use('/api', adminReportsRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

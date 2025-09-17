@@ -58,7 +58,9 @@ router.post('/consent-version', upload.single('consentFile'), async (req, res) =
     const {
       version,
       language = 'th',
+      title = '',
       description = '',
+      userType = 'customer',
       isActive = true
     } = req.body;
 
@@ -87,23 +89,21 @@ router.post('/consent-version', upload.single('consentFile'), async (req, res) =
     // Insert new consent version
     const insertQuery = `
       INSERT INTO consent_versions 
-      (version, language, title, description, user_type, file_path, file_name, file_size, mime_type, is_active, uploaded_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      (version, language, description, user_type, file_path, file_name, file_size, is_active, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
 
     const result = await pool.query(insertQuery, [
       version,
       language,
-      title || `Consent Version ${version}`,
       description,
       userType,
       req.file.path,
       req.file.originalname,
-      req.file.size,
-      req.file.mimetype,
+      req.file.size.toString(),
       isActive,
-      req.ip // Using IP as uploaded_by for now
+      req.ip // Using IP as created_by for now
     ]);
 
     res.status(201).json({
@@ -133,6 +133,70 @@ router.post('/consent-version', upload.single('consentFile'), async (req, res) =
     res.status(500).json({
       success: false,
       message: 'Failed to upload consent version',
+      error: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/upload/consent-version/:id/content - Get consent version content
+router.get('/consent-version/:id/content', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get version details
+    const versionQuery = `
+      SELECT id, version, language, user_type, file_path, file_name, mime_type
+      FROM consent_versions 
+      WHERE id = $1
+    `;
+    
+    const versionResult = await pool.query(versionQuery, [id]);
+    
+    if (versionResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Consent version not found'
+      });
+    }
+    
+    const version = versionResult.rows[0];
+    const filePath = version.file_path;
+    
+    // Check if file exists
+    if (!filePath || !await fs.access(filePath).then(() => true).catch(() => false)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Consent file not found'
+      });
+    }
+    
+    // Read file content based on mime type
+    let content = '';
+    if (version.mime_type === 'text/html' || version.mime_type === 'text/plain') {
+      content = await fs.readFile(filePath, 'utf8');
+    } else {
+      // For PDF/DOC files, return file path for download
+      content = `File type: ${version.mime_type}. Please download to view.`;
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        id: version.id,
+        version: version.version,
+        language: version.language,
+        userType: version.user_type,
+        fileName: version.file_name,
+        mimeType: version.mime_type,
+        content: content
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching consent content:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch consent content',
       error: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }

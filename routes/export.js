@@ -196,30 +196,36 @@ router.get('/csv', async (req, res) => {
     // Build WHERE clause (same as above)
     let whereConditions = ['is_active = TRUE'];
     let queryParams = [];
+    let paramIndex = 1;
 
     if (searchTerm) {
-      whereConditions.push('(name_surname LIKE ? OR id_passport LIKE ?)');
+      whereConditions.push(`(name_surname LIKE $${paramIndex} OR id_passport LIKE $${paramIndex + 1})`);
       queryParams.push(`%${searchTerm}%`, `%${searchTerm}%`);
+      paramIndex += 2;
     }
 
     if (consentType) {
-      whereConditions.push('consent_type = ?');
+      whereConditions.push(`consent_type = $${paramIndex}`);
       queryParams.push(consentType);
+      paramIndex++;
     }
 
     if (language) {
-      whereConditions.push('consent_language = ?');
+      whereConditions.push(`consent_language = $${paramIndex}`);
       queryParams.push(language);
+      paramIndex++;
     }
 
     if (startDate) {
-      whereConditions.push('DATE(created_date) >= ?');
+      whereConditions.push(`DATE(created_date) >= $${paramIndex}`);
       queryParams.push(startDate);
+      paramIndex++;
     }
 
     if (endDate) {
-      whereConditions.push('DATE(created_date) <= ?');
+      whereConditions.push(`DATE(created_date) <= $${paramIndex}`);
       queryParams.push(endDate);
+      paramIndex++;
     }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
