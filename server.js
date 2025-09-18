@@ -159,9 +159,32 @@ const startServer = async () => {
       console.error('❌ Cannot start server: Database connection failed');
       process.exit(1);
     }
+    console.log('✅ Database connected successfully');
     
     // Initialize database tables
-    await initializeDatabase();
+    await require('./models/db-init')();
+    console.log('✅ Database tables initialized successfully');
+    
+    // Run database migrations to fix field sizes
+    try {
+      const fs = require('fs').promises;
+      const path = require('path');
+      const migrationPath = path.join(__dirname, 'migrations', 'fix-field-sizes.sql');
+      
+      // Check if migration file exists
+      try {
+        await fs.access(migrationPath);
+        const migrationSQL = await fs.readFile(migrationPath, 'utf8');
+        const { pool } = require('./config/database');
+        await pool.query(migrationSQL);
+        console.log('✅ Database field sizes updated successfully');
+      } catch (err) {
+        // Migration file doesn't exist or already applied
+        console.log('ℹ️ Migration skipped or already applied');
+      }
+    } catch (error) {
+      console.log('⚠️ Migration error (non-critical):', error.message);
+    }
     
     // Start listening
     app.listen(PORT, () => {
