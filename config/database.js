@@ -1,20 +1,36 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// Database configuration
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 5432,
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || '4321',
-  database: process.env.DB_NAME || 'consent',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true
-};
+// Database configuration - Support for Render DATABASE_URL
+let dbConfig;
+
+if (process.env.DATABASE_URL) {
+  // Use DATABASE_URL if available (for Render deployment)
+  dbConfig = {
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? {
+      rejectUnauthorized: false // Required for Render PostgreSQL
+    } : false,
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+    max: 10
+  };
+} else {
+  // Fallback to individual environment variables (for local development)
+  dbConfig = {
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 5432,
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || '4321',
+    database: process.env.DB_NAME || 'consent',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    acquireTimeout: 60000,
+    timeout: 60000,
+    reconnect: true
+  };
+}
 
 // Create connection pool
 const pool = new Pool(dbConfig);
