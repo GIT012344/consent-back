@@ -175,23 +175,30 @@ const handleConsentSubmission = async (req, res) => {
     if (existingConsent.rows.length > 0) {
       const existing = existingConsent.rows[0];
       
-      // Check if trying to submit same version
+      // Check if trying to submit same version within 5 minutes (prevent double-click)
       if (existing.consent_version === finalConsentVersion) {
-        return res.status(409).json({
-          success: false,
-          message: 'Consent already exists for this ID/Passport number and version',
-          existingRecord: {
-            id: existing.id,
-            name_surname: existing.name_surname,
-            created_date: existing.created_date,
-            consent_type: existing.consent_type,
-            consent_language: existing.consent_language,
-            consent_version: existing.consent_version
-          }
-        });
+        const timeDiff = new Date() - new Date(existing.created_date);
+        const minutesDiff = timeDiff / (1000 * 60);
+        
+        if (minutesDiff < 5) {
+          // Recent duplicate - likely a double-click
+          return res.status(409).json({
+            success: false,
+            message: 'Consent recently submitted. Please wait before resubmitting.',
+            existingRecord: {
+              id: existing.id,
+              name_surname: existing.name_surname,
+              created_date: existing.created_date,
+              consent_type: existing.consent_type,
+              consent_language: existing.consent_language,
+              consent_version: existing.consent_version
+            }
+          });
+        }
       }
       
-      // Different version - allow re-consent but deactivate old record
+      // Allow re-consent after 5 minutes or for different version
+      // Deactivate old records
       await pool.query(
         'UPDATE consent_records SET is_active = FALSE WHERE id_passport = $1 AND is_active = TRUE',
         [idPassport]

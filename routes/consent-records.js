@@ -78,7 +78,23 @@ router.get('/', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(offset);
 
-    const result = await pool.query(query, params);
+    // Retry logic for connection issues
+    let result;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        result = await pool.query(query, params);
+        break;
+      } catch (err) {
+        if (err.code === 'ECONNREFUSED' && retries > 1) {
+          console.log(`⚠️ Connection failed, retrying... (${retries - 1} attempts left)`);
+          retries--;
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        } else {
+          throw err;
+        }
+      }
+    }
 
     // Get total count for pagination
     let countQuery = `

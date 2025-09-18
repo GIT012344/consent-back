@@ -165,25 +165,62 @@ const startServer = async () => {
     await require('./models/db-init')();
     console.log('✅ Database tables initialized successfully');
     
-    // Run database migrations to fix field sizes
+    // Run database migrations to fix field sizes - FORCE RUN
     try {
-      const fs = require('fs').promises;
-      const path = require('path');
-      const migrationPath = path.join(__dirname, 'migrations', 'fix-field-sizes.sql');
+      const { pool } = require('./config/database');
       
-      // Check if migration file exists
-      try {
-        await fs.access(migrationPath);
-        const migrationSQL = await fs.readFile(migrationPath, 'utf8');
-        const { pool } = require('./config/database');
-        await pool.query(migrationSQL);
-        console.log('✅ Database field sizes updated successfully');
-      } catch (err) {
-        // Migration file doesn't exist or already applied
-        console.log('ℹ️ Migration skipped or already applied');
+      // Force update field sizes directly without checking files
+      console.log('🔧 Running database field size migration...');
+      
+      // Update consent_records table field sizes
+      const updateQueries = [
+        `ALTER TABLE consent_records 
+         ALTER COLUMN title TYPE VARCHAR(100),
+         ALTER COLUMN name_surname TYPE VARCHAR(500),
+         ALTER COLUMN id_passport TYPE VARCHAR(100),
+         ALTER COLUMN email TYPE VARCHAR(255),
+         ALTER COLUMN phone TYPE VARCHAR(50),
+         ALTER COLUMN consent_type TYPE VARCHAR(100),
+         ALTER COLUMN user_type TYPE VARCHAR(100),
+         ALTER COLUMN consent_version TYPE VARCHAR(100),
+         ALTER COLUMN ip_address TYPE VARCHAR(100),
+         ALTER COLUMN status TYPE VARCHAR(50)`,
+         
+        // Update consent_history if exists
+        `DO $$
+        BEGIN
+          IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'consent_history') THEN
+            ALTER TABLE consent_history
+              ALTER COLUMN name_surname TYPE VARCHAR(500),
+              ALTER COLUMN id_passport TYPE VARCHAR(100),
+              ALTER COLUMN consent_version TYPE VARCHAR(100),
+              ALTER COLUMN consent_type TYPE VARCHAR(100),
+              ALTER COLUMN user_type TYPE VARCHAR(100);
+          END IF;
+        END $$`,
+        
+        // Add indexes for performance
+        `CREATE INDEX IF NOT EXISTS idx_consent_records_id_passport ON consent_records(id_passport)`,
+        `CREATE INDEX IF NOT EXISTS idx_consent_records_user_type ON consent_records(user_type)`,
+        `CREATE INDEX IF NOT EXISTS idx_consent_records_created_date ON consent_records(created_date)`
+      ];
+      
+      // Execute each query
+      for (const query of updateQueries) {
+        try {
+          await pool.query(query);
+        } catch (err) {
+          if (err.code !== '42701' && err.code !== '42P07') { // Ignore already exists errors
+            console.log('⚠️ Migration query warning:', err.message);
+          }
+        }
       }
+      
+      console.log('✅ Database field sizes migration completed');
+      
     } catch (error) {
-      console.log('⚠️ Migration error (non-critical):', error.message);
+      console.error('❌ Critical migration error:', error.message);
+      // Don't stop server, but log the error
     }
     
     // Start listening
