@@ -25,11 +25,15 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-// CORS configuration
+// CORS configuration - Updated to handle all Render frontend URLs
 const corsOrigins = process.env.NODE_ENV === 'production' 
   ? [
-      process.env.CORS_ORIGIN || 'https://consent-frontend.onrender.com',
-      'https://consent-frontend-hjts.onrender.com' // Your existing frontend
+      process.env.CORS_ORIGIN,
+      'https://consent-frontend.onrender.com',
+      'https://consent-frontend-hjts.onrender.com',
+      'https://consent-frontend-yb6t.onrender.com', // New frontend URL
+      // Add pattern to match all Render frontend URLs
+      /^https:\/\/consent-frontend-[a-z0-9]+\.onrender\.com$/
     ].filter(Boolean)
   : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3003', 'http://127.0.0.1:3000'];
 
@@ -38,16 +42,32 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (corsOrigins.indexOf(origin) !== -1) {
+    // Check if origin matches any allowed origin
+    const isAllowed = corsOrigins.some(allowedOrigin => {
+      if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return allowedOrigin === origin;
+    });
+    
+    if (isAllowed) {
       callback(null, true);
     } else {
       console.log('CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+      // In production, be more permissive for Render URLs
+      if (process.env.NODE_ENV === 'production' && origin.includes('.onrender.com')) {
+        console.log('Allowing Render URL:', origin);
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
 // Rate limiting - increased limits for development
