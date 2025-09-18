@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../db');
+const { pool } = require('../config/database');
 
 // GET /api/admin/statistics - Get consent statistics
 router.get('/statistics', async (req, res) => {

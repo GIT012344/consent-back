@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../db');
+const { pool } = require('../config/database');
 
 // GET /api/admin/policy-versions - List all policy versions
 router.get('/admin/policy-versions', async (req, res) => {
