@@ -11,10 +11,10 @@ if (process.env.DATABASE_URL) {
     ssl: process.env.NODE_ENV === 'production' ? {
       rejectUnauthorized: false // Required for Render PostgreSQL
     } : false,
-    connectionTimeoutMillis: 30000, // Increased timeout
-    idleTimeoutMillis: 10000, // Reduced idle timeout to prevent stale connections
-    max: 20, // Increased pool size
-    min: 2, // Minimum connections to maintain
+    connectionTimeoutMillis: 60000, // Increased timeout for Render
+    idleTimeoutMillis: 30000, // Increased idle timeout
+    max: 50, // Much larger pool size for production
+    min: 5, // More minimum connections
     statement_timeout: 60000,
     query_timeout: 60000,
     keepAlive: true,
@@ -42,16 +42,21 @@ const pool = new Pool(dbConfig);
 
 // Handle pool errors
 pool.on('error', (err, client) => {
-  console.error('Unexpected pool error:', err);
+  console.error('❌ Unexpected pool error:', err.message);
+  // Don't exit process, just log the error
 });
 
-// Handle connection events
+// Handle connection events - reduce logging to avoid spam
 pool.on('connect', (client) => {
-  console.log('✅ New database connection established');
+  if (process.env.DEBUG === 'true') {
+    console.log('✅ New database connection established');
+  }
 });
 
 pool.on('remove', (client) => {
-  console.log('⚠️ Database connection removed from pool');
+  if (process.env.DEBUG === 'true') {
+    console.log('⚠️ Database connection removed from pool');
+  }
 });
 
 // Test database connection
@@ -475,7 +480,9 @@ const initializeDatabase = async () => {
   }
 };
 
-module.exports = pool;
-module.exports.pool = pool;
-module.exports.testConnection = testConnection;
-module.exports.initializeDatabase = initializeDatabase;
+// Export pool and functions properly
+module.exports = {
+  pool,
+  testConnection,
+  initializeDatabase
+};
