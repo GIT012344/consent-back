@@ -11,9 +11,14 @@ if (process.env.DATABASE_URL) {
     ssl: process.env.NODE_ENV === 'production' ? {
       rejectUnauthorized: false // Required for Render PostgreSQL
     } : false,
-    connectionTimeoutMillis: 10000,
-    idleTimeoutMillis: 30000,
-    max: 10
+    connectionTimeoutMillis: 30000, // Increased timeout
+    idleTimeoutMillis: 10000, // Reduced idle timeout to prevent stale connections
+    max: 20, // Increased pool size
+    min: 2, // Minimum connections to maintain
+    statement_timeout: 60000,
+    query_timeout: 60000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000
   };
 } else {
   // Fallback to individual environment variables (for local development)
@@ -32,8 +37,22 @@ if (process.env.DATABASE_URL) {
   };
 }
 
-// Create connection pool
+// Create connection pool with error handling
 const pool = new Pool(dbConfig);
+
+// Handle pool errors
+pool.on('error', (err, client) => {
+  console.error('Unexpected pool error:', err);
+});
+
+// Handle connection events
+pool.on('connect', (client) => {
+  console.log('✅ New database connection established');
+});
+
+pool.on('remove', (client) => {
+  console.log('⚠️ Database connection removed from pool');
+});
 
 // Test database connection
 const testConnection = async () => {
