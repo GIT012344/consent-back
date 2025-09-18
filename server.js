@@ -178,35 +178,43 @@ const startServer = async () => {
         const migrationSQL = await fs.readFile(migrationPath, 'utf8');
         const { pool } = require('./config/database');
         
-        // Split SQL commands and run them separately to handle errors better
-        const commands = migrationSQL
-          .split(';')
-          .filter(cmd => cmd.trim())
-          .map(cmd => cmd.trim() + ';');
-        
-        for (const command of commands) {
-          if (command.includes('ALTER TABLE') || command.includes('CREATE INDEX')) {
-            try {
-              await pool.query(command);
-              console.log('✅ Executed:', command.substring(0, 50) + '...');
-            } catch (cmdError) {
-              // Only log if it's not a "column already exists" error
-              if (!cmdError.message.includes('already exists')) {
-                console.log('⚠️ Migration command error:', cmdError.message);
-              }
+        // Parse and execute SQL commands properly
+        // First, execute all simple ALTER TABLE commands
+        const alterCommands = migrationSQL.match(/ALTER TABLE[^;]+;/g) || [];
+        for (const command of alterCommands) {
+          try {
+            await pool.query(command);
+            console.log('✅ Executed:', command.substring(0, 60) + '...');
+          } catch (cmdError) {
+            if (!cmdError.message.includes('already exists') && 
+                !cmdError.message.includes('does not exist')) {
+              console.log('⚠️ Migration error:', cmdError.message);
             }
-          } else if (command.includes('DO $$')) {
-            // Execute DO blocks as a whole
-            const doBlockMatch = migrationSQL.match(/DO \$\$[\s\S]*?END \$\$/g);
-            if (doBlockMatch) {
-              for (const doBlock of doBlockMatch) {
-                try {
-                  await pool.query(doBlock + ';');
-                  console.log('✅ Executed DO block');
-                } catch (blockError) {
-                  console.log('⚠️ DO block error:', blockError.message);
-                }
-              }
+          }
+        }
+        
+        // Then execute DO blocks
+        const doBlocks = migrationSQL.match(/DO \$\$[\s\S]*?END \$\$;/g) || [];
+        for (const doBlock of doBlocks) {
+          try {
+            await pool.query(doBlock);
+            console.log('✅ Executed DO block successfully');
+          } catch (blockError) {
+            if (!blockError.message.includes('already exists')) {
+              console.log('⚠️ DO block error:', blockError.message);
+            }
+          }
+        }
+        
+        // Finally, execute CREATE INDEX commands
+        const indexCommands = migrationSQL.match(/CREATE INDEX[^;]+;/g) || [];
+        for (const command of indexCommands) {
+          try {
+            await pool.query(command);
+            console.log('✅ Created index:', command.substring(0, 50) + '...');
+          } catch (indexError) {
+            if (!indexError.message.includes('already exists')) {
+              console.log('⚠️ Index error:', indexError.message);
             }
           }
         }

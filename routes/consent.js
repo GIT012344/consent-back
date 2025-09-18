@@ -184,8 +184,7 @@ const handleConsentSubmission = async (req, res) => {
         
         const updateQuery = `
           UPDATE consent_records 
-          SET name_surname = $1,
-              updated_at = NOW()
+          SET name_surname = $1
           WHERE id_passport = $2 AND consent_version = $3 AND is_active = TRUE
           RETURNING id, created_date, created_time
         `;
