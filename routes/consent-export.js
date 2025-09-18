@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/database').pool;
+const { pool } = require('../config/database');
 const { Parser } = require('json2csv');
 
 // Export consents to CSV

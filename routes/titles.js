@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/database');
+const { pool } = require('../config/database');
 
 // GET /api/titles - Get all titles (simplified for admin)
 router.get('/', async (req, res) => {

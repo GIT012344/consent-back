@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/database');
+const { pool } = require('../config/database');
 
 // GET /api/simple-policy/active - Get active policy for specific userType and language
 router.get('/active', async (req, res) => {
