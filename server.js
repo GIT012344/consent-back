@@ -166,61 +166,58 @@ const startServer = async () => {
     console.log('✅ Database tables initialized successfully');
     
     // Run database migrations to fix field sizes - FORCE RUN
+    console.log('🔄 Running database migrations...');
     try {
-      const { pool } = require('./config/database');
+      const fs = require('fs').promises;
+      const path = require('path');
+      const migrationPath = path.join(__dirname, 'migrations', 'fix-field-sizes.sql');
       
-      // Force update field sizes directly without checking files
-      console.log('🔧 Running database field size migration...');
-      
-      // Update consent_records table field sizes
-      const updateQueries = [
-        `ALTER TABLE consent_records 
-         ALTER COLUMN title TYPE VARCHAR(100),
-         ALTER COLUMN name_surname TYPE VARCHAR(500),
-         ALTER COLUMN id_passport TYPE VARCHAR(100),
-         ALTER COLUMN email TYPE VARCHAR(255),
-         ALTER COLUMN phone TYPE VARCHAR(50),
-         ALTER COLUMN consent_type TYPE VARCHAR(100),
-         ALTER COLUMN user_type TYPE VARCHAR(100),
-         ALTER COLUMN consent_version TYPE VARCHAR(100),
-         ALTER COLUMN ip_address TYPE VARCHAR(100),
-         ALTER COLUMN status TYPE VARCHAR(50)`,
-         
-        // Update consent_history if exists
-        `DO $$
-        BEGIN
-          IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'consent_history') THEN
-            ALTER TABLE consent_history
-              ALTER COLUMN name_surname TYPE VARCHAR(500),
-              ALTER COLUMN id_passport TYPE VARCHAR(100),
-              ALTER COLUMN consent_version TYPE VARCHAR(100),
-              ALTER COLUMN consent_type TYPE VARCHAR(100),
-              ALTER COLUMN user_type TYPE VARCHAR(100);
-          END IF;
-        END $$`,
+      // Check if migration file exists
+      try {
+        await fs.access(migrationPath);
+        const migrationSQL = await fs.readFile(migrationPath, 'utf8');
+        const { pool } = require('./config/database');
         
-        // Add indexes for performance
-        `CREATE INDEX IF NOT EXISTS idx_consent_records_id_passport ON consent_records(id_passport)`,
-        `CREATE INDEX IF NOT EXISTS idx_consent_records_user_type ON consent_records(user_type)`,
-        `CREATE INDEX IF NOT EXISTS idx_consent_records_created_date ON consent_records(created_date)`
-      ];
-      
-      // Execute each query
-      for (const query of updateQueries) {
-        try {
-          await pool.query(query);
-        } catch (err) {
-          if (err.code !== '42701' && err.code !== '42P07') { // Ignore already exists errors
-            console.log('⚠️ Migration query warning:', err.message);
+        // Split SQL commands and run them separately to handle errors better
+        const commands = migrationSQL
+          .split(';')
+          .filter(cmd => cmd.trim())
+          .map(cmd => cmd.trim() + ';');
+        
+        for (const command of commands) {
+          if (command.includes('ALTER TABLE') || command.includes('CREATE INDEX')) {
+            try {
+              await pool.query(command);
+              console.log('✅ Executed:', command.substring(0, 50) + '...');
+            } catch (cmdError) {
+              // Only log if it's not a "column already exists" error
+              if (!cmdError.message.includes('already exists')) {
+                console.log('⚠️ Migration command error:', cmdError.message);
+              }
+            }
+          } else if (command.includes('DO $$')) {
+            // Execute DO blocks as a whole
+            const doBlockMatch = migrationSQL.match(/DO \$\$[\s\S]*?END \$\$/g);
+            if (doBlockMatch) {
+              for (const doBlock of doBlockMatch) {
+                try {
+                  await pool.query(doBlock + ';');
+                  console.log('✅ Executed DO block');
+                } catch (blockError) {
+                  console.log('⚠️ DO block error:', blockError.message);
+                }
+              }
+            }
           }
         }
+        
+        console.log('✅ Database migrations completed');
+      } catch (err) {
+        console.error('❌ Migration file error:', err.message);
       }
-      
-      console.log('✅ Database field sizes migration completed');
-      
     } catch (error) {
-      console.error('❌ Critical migration error:', error.message);
-      // Don't stop server, but log the error
+      console.error('❌ Migration error:', error.message);
+      // Don't exit - let the server continue
     }
     
     // Start listening

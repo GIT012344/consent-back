@@ -78,21 +78,27 @@ router.get('/', async (req, res) => {
     query += ` OFFSET $${paramCount}`;
     params.push(offset);
 
-    // Retry logic for connection issues
+    // Get a new connection from pool with retry logic
     let result;
     let retries = 3;
     while (retries > 0) {
       try {
-        result = await pool.query(query, params);
-        break;
-      } catch (err) {
-        if (err.code === 'ECONNREFUSED' && retries > 1) {
-          console.log(`⚠️ Connection failed, retrying... (${retries - 1} attempts left)`);
-          retries--;
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        } else {
-          throw err;
+        const client = await pool.connect();
+        try {
+          result = await client.query(query, params);
+          client.release();
+          break;
+        } catch (queryErr) {
+          client.release();
+          throw queryErr;
         }
+      } catch (connErr) {
+        retries--;
+        if (retries === 0) {
+          throw connErr;
+        }
+        console.log(`Retrying database connection... (${3 - retries}/3)`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
@@ -135,7 +141,29 @@ router.get('/', async (req, res) => {
       countParams.push(endDate);
     }
 
-    const countResult = await pool.query(countQuery, countParams);
+    // Also retry count query
+    let countResult;
+    retries = 3;
+    while (retries > 0) {
+      try {
+        const client = await pool.connect();
+        try {
+          countResult = await client.query(countQuery, countParams);
+          client.release();
+          break;
+        } catch (queryErr) {
+          client.release();
+          throw queryErr;
+        }
+      } catch (connErr) {
+        retries--;
+        if (retries === 0) {
+          throw connErr;
+        }
+        console.log(`Retrying count query... (${3 - retries}/3)`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
     const total = parseInt(countResult.rows[0]?.total || 0);
 
     res.json({
