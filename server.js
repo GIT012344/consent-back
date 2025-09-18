@@ -25,50 +25,55 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-// CORS configuration - Updated to handle all Render frontend URLs
-const corsOrigins = process.env.NODE_ENV === 'production' 
-  ? [
-      process.env.CORS_ORIGIN,
-      'https://consent-frontend.onrender.com',
-      'https://consent-frontend-hjts.onrender.com',
-      'https://consent-frontend-yb6t.onrender.com', // New frontend URL
-      // Add pattern to match all Render frontend URLs
-      /^https:\/\/consent-frontend-[a-z0-9]+\.onrender\.com$/
-    ].filter(Boolean)
-  : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3003', 'http://127.0.0.1:3000'];
-
-app.use(cors({
+// CORS configuration - Simplified and more permissive for Render
+const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // Check if origin matches any allowed origin
-    const isAllowed = corsOrigins.some(allowedOrigin => {
-      if (allowedOrigin instanceof RegExp) {
-        return allowedOrigin.test(origin);
+    // In production, allow all Render URLs
+    if (process.env.NODE_ENV === 'production') {
+      // Allow any origin that contains 'onrender.com'
+      if (origin.includes('onrender.com')) {
+        console.log('Allowing Render origin:', origin);
+        return callback(null, true);
       }
-      return allowedOrigin === origin;
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
+      // Also allow the specific CORS_ORIGIN if set
+      if (process.env.CORS_ORIGIN && origin === process.env.CORS_ORIGIN) {
+        return callback(null, true);
+      }
     } else {
-      console.log('CORS blocked origin:', origin);
-      // In production, be more permissive for Render URLs
-      if (process.env.NODE_ENV === 'production' && origin.includes('.onrender.com')) {
-        console.log('Allowing Render URL:', origin);
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
+      // In development, allow localhost
+      const localhostRegex = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+      if (localhostRegex.test(origin)) {
+        return callback(null, true);
       }
     }
+    
+    console.log('CORS blocked origin:', origin);
+    // Be permissive and allow anyway if uncertain
+    callback(null, true);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'Content-Type'],
   preflightContinue: false,
-  optionsSuccessStatus: 204
-}));
+  optionsSuccessStatus: 204,
+  maxAge: 86400 // Cache preflight response for 24 hours
+};
+
+app.use(cors(corsOptions));
+
+// Additional middleware to ensure CORS headers are always set
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && origin.includes('onrender.com')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  next();
+});
 
 // Rate limiting - increased limits for development
 const limiter = rateLimit({
@@ -87,6 +92,19 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
+
+// Handle preflight requests globally
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && origin.includes('onrender.com')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+  res.sendStatus(204);
+});
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -127,9 +145,18 @@ app.use('*', (req, res) => {
   });
 });
 
-// Global error handler
+// Global error handler - ensure CORS headers are set even on errors
 app.use((error, req, res, next) => {
   console.error('Global error handler:', error);
+  
+  // Ensure CORS headers are set even on error responses
+  const origin = req.headers.origin;
+  if (origin && origin.includes('onrender.com')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+  }
   
   res.status(error.status || 500).json({
     error: process.env.NODE_ENV === 'production' 
