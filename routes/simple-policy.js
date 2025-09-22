@@ -5,7 +5,12 @@ const { pool } = require('../config/database');
 // GET /api/simple-policy/active - Get active policy for specific userType and language
 router.get('/active', async (req, res) => {
   try {
-    const { userType = 'customer', language = 'th-TH' } = req.query;
+    const { userType = 'customer', language = 'th' } = req.query;
+    
+    // Convert language format if needed (th-TH -> th, en-US -> en)
+    const langCode = language.includes('-') ? language.split('-')[0] : language;
+    
+    console.log(`Fetching policy for userType: ${userType}, language: ${langCode}`);
     
     // Query directly from policy_versions table
     const query = `
@@ -28,19 +33,25 @@ router.get('/active', async (req, res) => {
       LIMIT 1
     `;
     
-    const result = await pool.query(query, [userType, language]);
+    const result = await pool.query(query, [userType, langCode]);
     
     if (result.rows.length > 0) {
+      console.log(`Found policy: ${result.rows[0].title}`);
       return res.json({
         success: true,
         data: result.rows[0]
       });
     }
     
+    // Don't use fallback - must match exact language
+    // This ensures Thai users ONLY see Thai content (001)
+    // and English users ONLY see English content (002)
+    
     // No policy found
+    console.log(`No policy found for userType: ${userType}, language: ${langCode}`);
     res.json({
       success: false,
-      message: `No active policy found for userType: ${userType}, language: ${language}`,
+      message: `No active policy found for userType: ${userType}, language: ${langCode}`,
       data: null
     });
     
@@ -315,6 +326,10 @@ router.post('/', async (req, res) => {
       )
     `);
 
+    // Log received data for debugging
+    console.log('Received language from frontend:', language);
+    console.log('Received userType:', actualUserType);
+    
     // Check for duplicate policy (same title, userType, and language)
     const duplicateCheck = await pool.query(`
       SELECT id, title, version, user_type
@@ -322,15 +337,34 @@ router.post('/', async (req, res) => {
       WHERE LOWER(title) = LOWER($1) 
         AND language = $2
         AND user_type = $3
+        AND is_active = true
       LIMIT 1
     `, [title, language, actualUserType]);
 
     if (duplicateCheck.rows.length > 0) {
-      const existing = duplicateCheck.rows[0];
-      return res.status(409).json({
-        success: false,
-        message: `Policy ซ้ำ! มี Policy "${existing.title}" สำหรับ ${existing.user_type} ภาษา ${language === 'th-TH' ? 'ไทย' : 'อังกฤษ'} อยู่แล้ว (Version: ${existing.version})`,
-        existing: existing
+      // Update existing policy instead of blocking
+      const updateResult = await pool.query(
+        `UPDATE policy_versions 
+         SET content = $1, version = $2, updated_at = NOW()
+         WHERE id = $3
+         RETURNING *`,
+        [content, version, duplicateCheck.rows[0].id]
+      );
+      
+      const langCode = language === 'th-TH' ? 'th' : 'en';
+      const consentLink = `/consent/${actualUserType}?lang=${langCode}`;
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Policy updated successfully',
+        data: {
+          id: updateResult.rows[0].id,
+          version,
+          userType: actualUserType,
+          language,
+          title,
+          consentLink
+        }
       });
     }
 

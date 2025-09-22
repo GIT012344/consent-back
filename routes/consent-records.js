@@ -24,6 +24,7 @@ router.get('/', async (req, res) => {
         cr.consent_type,
         cr.consent_language,
         cr.consent_version,
+        cr.policy_title,
         cr.ip_address,
         cr.created_date,
         cr.created_time,

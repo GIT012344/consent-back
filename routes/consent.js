@@ -215,12 +215,12 @@ const handleConsentSubmission = async (req, res) => {
     // Generate unique consent ID
     const consentId = `CNS${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-    // Insert consent record - use only existing columns
+    // Insert consent record - include policy_title
     const insertQuery = `
       INSERT INTO consent_records 
       (name_surname, id_passport, ip_address, 
-       user_type, consent_type, consent_language, consent_version, created_date)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       user_type, consent_type, consent_language, consent_version, policy_title, created_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
       RETURNING id, created_date, created_time
     `;
 
@@ -231,7 +231,8 @@ const handleConsentSubmission = async (req, res) => {
       userType || 'customer',  // user_type
       consentType || userType || 'customer',  // consent_type
       language,
-      finalConsentVersion
+      finalConsentVersion,
+      finalPolicyTitle
     ]);
     
     // Check if consent_history table exists and has the required columns
@@ -387,10 +388,11 @@ router.get('/list', async (req, res) => {
     const countResult = await pool.query(countQuery, queryParams);
     const totalRecords = parseInt(countResult.rows[0].total);
 
-    // Get records with pagination
+    // Get records with pagination - include policy_title
     const dataQuery = `
-      SELECT id, title, name_surname, id_passport, created_date, created_time, 
-             ip_address, consent_type, consent_language, consent_version
+      SELECT id, name_surname, id_passport, created_date, created_time, 
+             ip_address, consent_type, user_type, consent_language, consent_version,
+             policy_title, is_active
       FROM consent_records 
       ${whereClause}
       ORDER BY created_date DESC 
@@ -575,41 +577,28 @@ router.get('/active-version/:userType/:language', async (req, res) => {
   try {
     const { userType, language } = req.params;
     
-    // First try policy_versions table (new structure)
-    const policyQuery = `
+    // First try to get from policy_versions table
+    const query = `
       SELECT * FROM policy_versions 
-      WHERE is_active = TRUE 
+      WHERE is_active = true 
         AND user_type = $1 
         AND language = $2
       ORDER BY created_at DESC
       LIMIT 1
     `;
     
-    let result = await pool.query(policyQuery, [userType, language]);
+    let result = await pool.query(query, [userType, language]);
     
-    // If no specific version found, try without language match
+    // If no result, try without language filter
     if (result.rows.length === 0) {
-      const defaultQuery = `
+      const fallbackQuery = `
         SELECT * FROM policy_versions 
-        WHERE is_active = TRUE 
+        WHERE is_active = true 
           AND user_type = $1
         ORDER BY created_at DESC
         LIMIT 1
       `;
-      result = await pool.query(defaultQuery, [userType]);
-    }
-    
-    // If still no version, try consent_versions table (old structure)
-    if (result.rows.length === 0) {
-      const consentQuery = `
-        SELECT * FROM consent_versions 
-        WHERE is_active = TRUE 
-          AND user_type = $1 
-          AND language = $2
-        ORDER BY created_at DESC
-        LIMIT 1
-      `;
-      result = await pool.query(consentQuery, [userType, language]);
+      result = await pool.query(fallbackQuery, [userType]);
     }
     
     if (result.rows.length > 0) {
@@ -619,9 +608,18 @@ router.get('/active-version/:userType/:language', async (req, res) => {
       });
     }
     
+    // If still no data, return a default message
     return res.json({
-      success: false,
-      message: 'No active version found'
+      success: true,
+      data: {
+        id: 0,
+        version: '1.0',
+        title: 'ข้อตกลงและเงื่อนไข',
+        content: '<p>ไม่พบเนื้อหาข้อตกลง กรุณาติดต่อผู้ดูแลระบบ</p>',
+        language: language,
+        user_type: userType,
+        is_active: true
+      }
     });
     
   } catch (error) {
