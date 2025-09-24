@@ -1,32 +1,64 @@
--- Add missing policy columns to consent_records and consent_history
--- This migration adds policy-related columns needed for policy tracking
+-- Add missing columns for policy tracking
+-- These columns are needed for the consent submission to work properly
 
--- 1. Add policy columns to consent_records
-ALTER TABLE consent_records ADD COLUMN IF NOT EXISTS policy_id INTEGER;
-ALTER TABLE consent_records ADD COLUMN IF NOT EXISTS policy_title VARCHAR(500);
-ALTER TABLE consent_records ADD COLUMN IF NOT EXISTS policy_version VARCHAR(100);
-
--- 2. Add policy columns to consent_history
-DO $$ 
+-- Add policy_id column to consent_records
+DO $$
 BEGIN
-  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'consent_history') THEN
-    ALTER TABLE consent_history ADD COLUMN IF NOT EXISTS policy_id INTEGER;
-    ALTER TABLE consent_history ADD COLUMN IF NOT EXISTS policy_title VARCHAR(500);
-    ALTER TABLE consent_history ADD COLUMN IF NOT EXISTS policy_version VARCHAR(100);
-  END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'consent_records' 
+                   AND column_name = 'policy_id') THEN
+        ALTER TABLE consent_records ADD COLUMN policy_id INTEGER;
+    END IF;
 END $$;
 
--- 3. Add indexes for policy_id for better query performance
+-- Add policy_title column to consent_records
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'consent_records' 
+                   AND column_name = 'policy_title') THEN
+        ALTER TABLE consent_records ADD COLUMN policy_title TEXT;
+    END IF;
+END $$;
+
+-- Add policy_version column to consent_records (if not exists)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'consent_records' 
+                   AND column_name = 'policy_version') THEN
+        ALTER TABLE consent_records ADD COLUMN policy_version VARCHAR(50);
+    END IF;
+END $$;
+
+-- Add indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_consent_records_policy_id ON consent_records(policy_id);
-DO $$ 
+CREATE INDEX IF NOT EXISTS idx_consent_records_policy_title ON consent_records(policy_title);
+
+-- Also add these columns to consent_history for consistency
+DO $$
 BEGIN
-  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'consent_history') THEN
-    CREATE INDEX IF NOT EXISTS idx_consent_history_policy_id ON consent_history(policy_id);
-  END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'consent_history' 
+                   AND column_name = 'policy_id') THEN
+        ALTER TABLE consent_history ADD COLUMN policy_id INTEGER;
+    END IF;
 END $$;
 
--- Display success message
-DO $$ 
-BEGIN 
-  RAISE NOTICE 'Policy columns have been successfully added!'; 
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'consent_history' 
+                   AND column_name = 'policy_title') THEN
+        ALTER TABLE consent_history ADD COLUMN policy_title TEXT;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'consent_history' 
+                   AND column_name = 'policy_version') THEN
+        ALTER TABLE consent_history ADD COLUMN policy_version VARCHAR(50);
+    END IF;
 END $$;

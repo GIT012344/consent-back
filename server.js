@@ -25,22 +25,17 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-// CORS configuration - Simplified and more permissive for Render
+// CORS configuration - Allow Netlify and Render
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // In production, allow all Render URLs and Netlify URLs
+    // In production, allow Render URLs and Netlify URLs
     if (process.env.NODE_ENV === 'production') {
-      // Allow any origin that contains 'onrender.com'
-      if (origin.includes('onrender.com')) {
-        console.log('Allowing Render origin:', origin);
-        return callback(null, true);
-      }
-      // Allow Netlify domains
-      if (origin.includes('netlify.app') || origin.includes('netlify.com')) {
-        console.log('Allowing Netlify origin:', origin);
+      // Allow any origin that contains 'onrender.com' or 'netlify.app'
+      if (origin.includes('onrender.com') || origin.includes('netlify.app')) {
+        console.log('Allowing origin:', origin);
         return callback(null, true);
       }
       // Also allow the specific CORS_ORIGIN if set
@@ -73,7 +68,7 @@ app.use(cors(corsOptions));
 // Additional middleware to ensure CORS headers are always set
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app') || origin.includes('netlify.com'))) {
+  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
@@ -101,7 +96,7 @@ app.use(limiter);
 // Handle preflight requests globally
 app.options('*', (req, res) => {
   const origin = req.headers.origin;
-  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app') || origin.includes('netlify.com'))) {
+  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
@@ -156,7 +151,7 @@ app.use((error, req, res, next) => {
   
   // Ensure CORS headers are set even on error responses
   const origin = req.headers.origin;
-  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app') || origin.includes('netlify.com'))) {
+  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
@@ -202,17 +197,15 @@ const startServer = async () => {
     try {
       const fs = require('fs').promises;
       const path = require('path');
-      const migrationDir = path.join(__dirname, 'migrations');
-      const { pool } = require('./config/database');
       
-      // Read all SQL files in migrations directory
-      const migrationFiles = await fs.readdir(migrationDir);
-      const sqlFiles = migrationFiles.filter(file => file.endsWith('.sql')).sort();
+      // First run the fix-field-sizes migration
+      const migrationPath = path.join(__dirname, 'migrations', 'fix-field-sizes.sql');
       
-      for (const sqlFile of sqlFiles) {
-        console.log(`📝 Running migration: ${sqlFile}`);
-        const migrationPath = path.join(migrationDir, sqlFile);
+      // Check if migration file exists
+      try {
+        await fs.access(migrationPath);
         const migrationSQL = await fs.readFile(migrationPath, 'utf8');
+        const { pool } = require('./config/database');
         
         // Parse and execute SQL commands properly
         // First, execute all simple ALTER TABLE commands
@@ -255,9 +248,48 @@ const startServer = async () => {
           }
         }
         
-        console.log(`✅ Migration ${sqlFile} completed`);
+        console.log('✅ Database migrations (fix-field-sizes) completed');
+      } catch (err) {
+        console.error('❌ Migration file error:', err.message);
       }
-      console.log('✅ All database migrations completed');
+      
+      // Run the add-policy-columns migration
+      const policyMigrationPath = path.join(__dirname, 'migrations', 'add-policy-columns.sql');
+      try {
+        await fs.access(policyMigrationPath);
+        const policyMigrationSQL = await fs.readFile(policyMigrationPath, 'utf8');
+        const { pool } = require('./config/database');
+        
+        // Execute DO blocks for adding columns
+        const policyDoBlocks = policyMigrationSQL.match(/DO \$\$[\s\S]*?END \$\$;/g) || [];
+        for (const doBlock of policyDoBlocks) {
+          try {
+            await pool.query(doBlock);
+            console.log('✅ Added policy column successfully');
+          } catch (blockError) {
+            if (!blockError.message.includes('already exists')) {
+              console.log('⚠️ Policy column error:', blockError.message);
+            }
+          }
+        }
+        
+        // Create indexes
+        const policyIndexCommands = policyMigrationSQL.match(/CREATE INDEX[^;]+;/g) || [];
+        for (const command of policyIndexCommands) {
+          try {
+            await pool.query(command);
+            console.log('✅ Created policy index:', command.substring(0, 50) + '...');
+          } catch (indexError) {
+            if (!indexError.message.includes('already exists')) {
+              console.log('⚠️ Policy index error:', indexError.message);
+            }
+          }
+        }
+        
+        console.log('✅ Database migrations (add-policy-columns) completed');
+      } catch (err) {
+        console.log('⚠️ Policy migration file not found or error:', err.message);
+      }
     } catch (error) {
       console.error('❌ Migration error:', error.message);
       // Don't exit - let the server continue
