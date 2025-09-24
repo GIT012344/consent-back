@@ -64,6 +64,55 @@ router.get('/active', async (req, res) => {
   }
 });
 
+// GET /api/simple-policy/:id - Get specific policy by ID
+router.get('/:id', async (req, res) => {
+  const { id } = req.params;
+  
+  // Check if id is numeric (specific policy) or not (list all)
+  if (!isNaN(id)) {
+    try {
+      const query = `
+        SELECT 
+          id,
+          version,
+          title,
+          content,
+          language,
+          user_type,
+          effective_date,
+          expiry_date,
+          is_active,
+          created_at
+        FROM policy_versions
+        WHERE id = $1
+      `;
+      
+      const result = await pool.query(query, [id]);
+      
+      if (result.rows.length > 0) {
+        res.json({
+          success: true,
+          data: result.rows[0]
+        });
+      } else {
+        res.status(404).json({
+          success: false,
+          message: 'Policy not found'
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching policy by ID:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to fetch policy' 
+      });
+    }
+  } else {
+    // If not numeric, treat as list request
+    next();
+  }
+});
+
 // GET /api/simple-policy - Get list of all policies
 router.get('/', async (req, res) => {
   try {

@@ -158,69 +158,95 @@ const handleConsentSubmission = async (req, res) => {
     const browser = clientBrowser || getBrowserInfo(req);
     const userAgent = clientUserAgent || req.headers['user-agent'] || 'Unknown';
     
-    // Use policy version if provided, otherwise consent version, otherwise default
-    const finalConsentVersion = policyVersion || consentVersion || '1.0';
-    const finalPolicyTitle = policyTitle || 'Consent Policy';
-
-    // Check if consent already exists for this ID/Passport 
+    // Get policy ID from request or find the active policy
+    const policyId = req.body.policyId || req.query.policy_id;
+    
+    let currentPolicy;
+    if (policyId) {
+      // Get specific policy by ID
+      const policyByIdQuery = await pool.query(
+        `SELECT id, version, title, content, user_type, language 
+         FROM policy_versions 
+         WHERE id = $1`,
+        [policyId]
+      );
+      currentPolicy = policyByIdQuery.rows[0];
+    } else {
+      // Fallback to active policy for user type and language
+      const currentPolicyQuery = await pool.query(
+        `SELECT id, version, title, content 
+         FROM policy_versions 
+         WHERE user_type = $1 
+           AND language = $2 
+           AND is_active = TRUE 
+         ORDER BY created_at DESC 
+         LIMIT 1`,
+        [userType || 'customer', language]
+      );
+      currentPolicy = currentPolicyQuery.rows[0];
+    }
+    
+    // Use actual policy data if available, otherwise use provided values
+    const finalPolicyId = currentPolicy?.id || policyId;
+    const finalConsentVersion = currentPolicy?.version || policyVersion || consentVersion || '1.0';
+    const finalPolicyTitle = currentPolicy?.title || policyTitle || 'Consent Policy';
+    
+    // Check if consent already exists for this specific policy
     const existingConsent = await pool.query(
-      `SELECT id, created_date, consent_version, name_surname, consent_type, consent_language 
-       FROM consent_records 
-       WHERE id_passport = $1 AND is_active = TRUE 
-       ORDER BY created_date DESC 
+      `SELECT cr.id, cr.created_date, cr.consent_version, cr.name_surname, 
+              cr.consent_type, cr.consent_language, cr.policy_title,
+              cr.user_type, cr.policy_id
+       FROM consent_records cr
+       WHERE cr.id_passport = $1 
+         AND cr.policy_id = $2
+         AND cr.is_active = TRUE 
+       ORDER BY cr.created_date DESC 
        LIMIT 1`,
-      [idPassport]
+      [idPassport, finalPolicyId]
     );
 
     if (existingConsent.rows.length > 0) {
       const existing = existingConsent.rows[0];
       
-      // Check if trying to submit same version within 24 hours
-      const hoursSinceLastConsent = (Date.now() - new Date(existing.created_date).getTime()) / (1000 * 60 * 60);
+      // Check if policy has changed (version, title, or content)
+      const policyChanged = currentPolicy && (
+        currentPolicy.version !== existing.consent_version ||
+        currentPolicy.title !== existing.policy_title
+      );
       
-      if (existing.consent_version === finalConsentVersion && hoursSinceLastConsent < 24) {
-        // Allow updates but just update the existing record instead of creating duplicate
-        console.log(`Updating existing consent for ${idPassport}`);
-        
-        const updateQuery = `
-          UPDATE consent_records 
-          SET name_surname = $1
-          WHERE id_passport = $2 AND consent_version = $3 AND is_active = TRUE
-          RETURNING id, created_date, created_time
-        `;
-        
-        const updateResult = await pool.query(updateQuery, [
-          fullName,
-          idPassport,
-          finalConsentVersion
-        ]);
-        
-        return res.json({
-          success: true,
-          message: 'Consent record updated successfully',
-          data: {
-            consentId: `CNS${updateResult.rows[0].id}`,
-            ...updateResult.rows[0]
+      // If policy hasn't changed, it's a duplicate
+      if (!policyChanged) {
+        // Return error message for duplicate submission
+        return res.status(400).json({
+          success: false,
+          message: `เลขบัตรประชาชน ${idPassport} ได้ให้ความยินยอมในเวอร์ชัน ${existing.consent_version} และนโยบาย "${existing.policy_title}" ไปแล้ว`,
+          isDuplicate: true,
+          existingRecord: {
+            id: existing.id,
+            consentDate: existing.created_date,
+            version: existing.consent_version,
+            policyTitle: existing.policy_title
           }
         });
       }
       
-      // Different version or more than 24 hours - allow re-consent but deactivate old record
+      // Policy has changed - allow re-consent but deactivate old record
+      // This allows users to consent again when policy content, version, or title changes
       await pool.query(
-        'UPDATE consent_records SET is_active = FALSE WHERE id_passport = $1 AND is_active = TRUE',
-        [idPassport]
+        'UPDATE consent_records SET is_active = FALSE WHERE id_passport = $1 AND user_type = $2 AND is_active = TRUE',
+        [idPassport, userType || 'customer']
       );
     }
 
     // Generate unique consent ID
     const consentId = `CNS${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-    // Insert consent record - include policy_title
+    // Insert consent record - include policy_title and policy_id
     const insertQuery = `
       INSERT INTO consent_records 
       (name_surname, id_passport, ip_address, 
-       user_type, consent_type, consent_language, consent_version, policy_title, created_date)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       user_type, consent_type, consent_language, consent_version, policy_title, policy_id, created_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
       RETURNING id, created_date, created_time
     `;
 
@@ -232,7 +258,8 @@ const handleConsentSubmission = async (req, res) => {
       consentType || userType || 'customer',  // consent_type
       language,
       finalConsentVersion,
-      finalPolicyTitle
+      finalPolicyTitle,
+      finalPolicyId  // policy_id
     ]);
     
     // Check if consent_history table exists and has the required columns

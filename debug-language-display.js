@@ -26,9 +26,9 @@ async function debugLanguageDisplay() {
     
     policies.rows.forEach(p => {
       const langDisplay = p.language === 'th' ? '🇹🇭 ภาษาไทย' : 
-                         p.language === 'en' ? '🇬🇧 English' :
+                         p.language === 'en' ? 'English' :
                          p.language === 'th-TH' ? '🇹🇭 ภาษาไทย (th-TH)' :
-                         p.language === 'en-US' ? '🇬🇧 English (en-US)' : p.language;
+                         p.language === 'en-US' ? 'English (en-US)' : p.language;
       
       console.log(`ID ${p.id}: ${p.user_type}/${p.language} = "${p.title}"`);
       console.log(`   Language: ${langDisplay}`);
@@ -66,7 +66,7 @@ async function debugLanguageDisplay() {
     console.log('- แต่อาจถูกบันทึกเป็น: "th-TH", "en-US", "ภาษาไทย", "English"');
     console.log('\nเมื่อสร้าง Policy ใหม่:');
     console.log('- เลือก "🇹🇭 ภาษาไทย" → จะบันทึกเป็น "th"');
-    console.log('- เลือก "🇬🇧 English" → จะบันทึกเป็น "en"');
+    console.log('- เลือก "English" → จะบันทึกเป็น "en"');
     
   } catch (error) {
     console.error('❌ Error:', error.message);

@@ -80,7 +80,7 @@ async function fixLanguageSave() {
     console.log('\n✅ แก้ไขเสร็จแล้ว!\n');
     console.log('การทำงานที่ถูกต้อง:');
     console.log('1. เลือก "🇹🇭 ภาษาไทย" → บันทึกเป็น "th"');
-    console.log('2. เลือก "🇬🇧 English" → บันทึกเป็น "en"');
+    console.log('2. เลือก "English" → บันทึกเป็น "en"');
     console.log('\nทดสอบ:');
     console.log('1. สร้าง Policy ใหม่ที่ http://localhost:5000/admin/create-policy');
     console.log('2. ดู Console (F12) จะเห็น log การแปลง language');
