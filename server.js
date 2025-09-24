@@ -31,11 +31,16 @@ const corsOptions = {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // In production, allow all Render URLs
+    // In production, allow all Render URLs and Netlify URLs
     if (process.env.NODE_ENV === 'production') {
       // Allow any origin that contains 'onrender.com'
       if (origin.includes('onrender.com')) {
         console.log('Allowing Render origin:', origin);
+        return callback(null, true);
+      }
+      // Allow Netlify domains
+      if (origin.includes('netlify.app') || origin.includes('netlify.com')) {
+        console.log('Allowing Netlify origin:', origin);
         return callback(null, true);
       }
       // Also allow the specific CORS_ORIGIN if set
@@ -68,7 +73,7 @@ app.use(cors(corsOptions));
 // Additional middleware to ensure CORS headers are always set
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && origin.includes('onrender.com')) {
+  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app') || origin.includes('netlify.com'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
@@ -96,7 +101,7 @@ app.use(limiter);
 // Handle preflight requests globally
 app.options('*', (req, res) => {
   const origin = req.headers.origin;
-  if (origin && origin.includes('onrender.com')) {
+  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app') || origin.includes('netlify.com'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
@@ -151,7 +156,7 @@ app.use((error, req, res, next) => {
   
   // Ensure CORS headers are set even on error responses
   const origin = req.headers.origin;
-  if (origin && origin.includes('onrender.com')) {
+  if (origin && (origin.includes('onrender.com') || origin.includes('netlify.app') || origin.includes('netlify.com'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
@@ -197,13 +202,17 @@ const startServer = async () => {
     try {
       const fs = require('fs').promises;
       const path = require('path');
-      const migrationPath = path.join(__dirname, 'migrations', 'fix-field-sizes.sql');
+      const migrationDir = path.join(__dirname, 'migrations');
+      const { pool } = require('./config/database');
       
-      // Check if migration file exists
-      try {
-        await fs.access(migrationPath);
+      // Read all SQL files in migrations directory
+      const migrationFiles = await fs.readdir(migrationDir);
+      const sqlFiles = migrationFiles.filter(file => file.endsWith('.sql')).sort();
+      
+      for (const sqlFile of sqlFiles) {
+        console.log(`📝 Running migration: ${sqlFile}`);
+        const migrationPath = path.join(migrationDir, sqlFile);
         const migrationSQL = await fs.readFile(migrationPath, 'utf8');
-        const { pool } = require('./config/database');
         
         // Parse and execute SQL commands properly
         // First, execute all simple ALTER TABLE commands
@@ -246,10 +255,9 @@ const startServer = async () => {
           }
         }
         
-        console.log('✅ Database migrations completed');
-      } catch (err) {
-        console.error('❌ Migration file error:', err.message);
+        console.log(`✅ Migration ${sqlFile} completed`);
       }
+      console.log('✅ All database migrations completed');
     } catch (error) {
       console.error('❌ Migration error:', error.message);
       // Don't exit - let the server continue

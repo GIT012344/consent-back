@@ -2,13 +2,46 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/database');
 
-// Get all form fields
+// Get all form fields - Return static data since table doesn't exist
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM consent_form_fields ORDER BY display_order, id'
-    );
-    res.json({ success: true, data: result.rows });
+    // Return static form fields since we don't have the table anymore
+    const staticFields = [
+      {
+        id: 1,
+        field_name: 'email',
+        field_label_th: 'อีเมล',
+        field_label_en: 'Email',
+        field_type: 'email',
+        is_required: false,
+        is_active: true,
+        display_order: 1,
+        options: []
+      },
+      {
+        id: 2,
+        field_name: 'phone',
+        field_label_th: 'เบอร์โทรศัพท์',
+        field_label_en: 'Phone Number',
+        field_type: 'phone',
+        is_required: false,
+        is_active: true,
+        display_order: 2,
+        options: []
+      },
+      {
+        id: 3,
+        field_name: 'address',
+        field_label_th: 'ที่อยู่',
+        field_label_en: 'Address',
+        field_type: 'text',
+        is_required: false,
+        is_active: true,
+        display_order: 3,
+        options: []
+      }
+    ];
+    res.json({ success: true, data: staticFields });
   } catch (error) {
     console.error('Error fetching form fields:', error);
     res.status(500).json({ success: false, message: error.message });

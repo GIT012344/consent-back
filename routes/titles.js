@@ -2,24 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/database');
 
-// GET /api/titles - Get all titles (simplified for admin)
+// GET /api/titles - Get all titles (return static data since table doesn't exist)
 router.get('/', async (req, res) => {
   try {
-    const query = `
-      SELECT id, title_th, title_en, is_active, created_at, updated_at 
-      FROM consent_titles 
-      ORDER BY display_order ASC, id ASC
-    `;
-    
-    const result = await pool.query(query);
-    
-    res.json({
-      success: true,
-      data: result.rows
-    });
-  } catch (error) {
-    console.error('Error fetching titles:', error);
-    // Return demo data if database fails
+    // Return static titles since we don't have the table anymore
     res.json({
       success: true,
       data: [
@@ -30,6 +16,9 @@ router.get('/', async (req, res) => {
         { id: 5, title_th: 'ศ.', title_en: 'Prof.', is_active: true }
       ]
     });
+  } catch (error) {
+    console.error('Error fetching titles:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
